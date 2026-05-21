@@ -9,7 +9,7 @@ resource "aws_subnet" "public" {
   count                   = length(var.public_subnets)
   vpc_id                  = aws_vpc.main.id
   cidr_block              = var.public_subnets[count.index]
-  availability_zone       = "af-south-1a"
+  availability_zone       = count.index == 0 ? "af-south-1a" : "af-south-1b"
   map_public_ip_on_launch = true
   tags = { Name = "${var.project_name}-${var.environment}-public-${count.index + 1}" }
 }
@@ -18,7 +18,7 @@ resource "aws_subnet" "private" {
   count             = length(var.private_subnets)
   vpc_id            = aws_vpc.main.id
   cidr_block        = var.private_subnets[count.index]
-  availability_zone = "af-south-1b"
+  availability_zone = count.index == 0 ? "af-south-1a" : "af-south-1b"
   tags = { Name = "${var.project_name}-${var.environment}-private-${count.index + 1}" }
 }
 
