@@ -1,0 +1,73 @@
+# ============================================================
+# DIGITRANS-CM — Kubernetes Deployment
+# Lance 3 copies de l'API pour la haute disponibilité
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: digitrans-api
+  namespace: production
+  labels:
+    app: digitrans-api
+    projet: digitrans-cm
+spec:
+  # Nombre de copies de l'API en production
+  replicas: 3
+
+  selector:
+    matchLabels:
+      app: digitrans-api
+
+  # Stratégie de mise à jour sans interruption
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1   # Maximum 1 copie indisponible pendant la mise à jour
+      maxSurge: 1         # Maximum 1 copie supplémentaire pendant la mise à jour
+
+  template:
+    metadata:
+      labels:
+        app: digitrans-api
+    spec:
+      containers:
+        - name: api
+          image: 579302404751.dkr.ecr.af-south-1.amazonaws.com/digitrans-cm-api:latest
+          ports:
+            - containerPort: 3000
+
+          # Variables d'environnement
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3000"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: digitrans-secrets
+                  key: jwt-secret
+
+          # Limites de ressources (évite qu'un conteneur consomme tout)
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+
+          # Health check — Kubernetes vérifie que l'API répond
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5

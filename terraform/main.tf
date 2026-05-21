@@ -63,3 +63,11 @@ output "redis_primary_endpoint" {
   value     = module.elasticache.redis_primary_endpoint
   sensitive = true
 }
+
+# ── Module CloudWatch (supervision) ─────────────────────────
+module "cloudwatch" {
+  source       = "./modules/cloudwatch"
+  project_name = var.project_name
+  environment  = var.environment
+  rds_id       = "${var.project_name}-${var.environment}-postgres"
+}

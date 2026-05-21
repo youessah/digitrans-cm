@@ -1,0 +1,24 @@
+# ============================================================
+# DIGITRANS-CM — Namespaces Kubernetes
+# Isolation des environnements dans le même cluster EKS
+# ============================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: production
+  labels:
+    env: production
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: staging
+  labels:
+    env: staging
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: development
+  labels:
+    env: development
