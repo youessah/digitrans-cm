@@ -1,0 +1,140 @@
+# ============================================================
+# DIGITRANS-CM — Pipeline CI/CD GitHub Actions
+# Déclenchement : push sur main (prod) ou develop (dev)
+# Étapes : tests → build Docker → push ECR → deploy Terraform
+# ============================================================
+
+name: DIGITRANS-CM Deploy
+
+on:
+  push:
+    branches:
+      - main       # déclenche le déploiement en PROD
+      - develop    # déclenche le déploiement en DEV
+
+env:
+  AWS_REGION      : af-south-1
+  ECR_REPOSITORY  : digitrans-cm-api
+  EKS_CLUSTER     : digitrans-cm-eks
+
+jobs:
+
+  # ── JOB 1 : Tests automatiques ────────────────────────────
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupérer le code source
+        uses: actions/checkout@v4
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      - name: Lancer les tests unitaires
+        run: npm test
+
+      - name: Vérifier la qualité du code (lint)
+        run: npm run lint
+
+  # ── JOB 2 : Build et push de l'image Docker ───────────────
+  build:
+    name: Build Docker
+    runs-on: ubuntu-latest
+    needs: test          # attend que les tests passent
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+
+    steps:
+      - name: Récupérer le code source
+        uses: actions/checkout@v4
+
+      - name: Configurer les credentials AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id    : ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region           : ${{ env.AWS_REGION }}
+
+      - name: Se connecter à AWS ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Définir le tag de l'image
+        id: meta
+        run: |
+          BRANCH=${GITHUB_REF#refs/heads/}
+          TAG=${BRANCH}-$(echo $GITHUB_SHA | cut -c1-7)
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Build et push de l'image Docker
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG    : ${{ steps.meta.outputs.tag }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "Image poussée : $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+
+  # ── JOB 3 : Déploiement Terraform ─────────────────────────
+  deploy:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    needs: build         # attend que l'image soit prête
+
+    # Détermine l'environnement selon la branche
+    env:
+      TF_ENV: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+
+    steps:
+      - name: Récupérer le code source
+        uses: actions/checkout@v4
+
+      - name: Configurer les credentials AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id    : ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region           : ${{ env.AWS_REGION }}
+
+      - name: Installer Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.7.0'
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform Validate
+        working-directory: terraform
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: terraform
+        run: |
+          terraform plan \
+            -var="environment=${{ env.TF_ENV }}" \
+            -var="db_password=${{ secrets.DB_PASSWORD }}" \
+            -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: terraform
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+        run: terraform apply -auto-approve tfplan
+
+      - name: Mettre à jour l'image dans EKS
+        run: |
+          aws eks update-kubeconfig --name $EKS_CLUSTER --region $AWS_REGION
+          kubectl set image deployment/digitrans-api \
+            api=${{ steps.login-ecr.outputs.registry }}/$ECR_REPOSITORY:${{ needs.build.outputs.image_tag }} \
+            -n digitrans-${{ env.TF_ENV }}
+          kubectl rollout status deployment/digitrans-api \
+            -n digitrans-${{ env.TF_ENV }}

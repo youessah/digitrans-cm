@@ -1,0 +1,23 @@
+# Terraform — fichiers sensibles et temporaires
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+*.tfplan
+tfplan
+
+# Variables sensibles — JAMAIS sur Git
+*.tfvars
+terraform.tfvars
+
+# AWS credentials — JAMAIS sur Git
+.aws/
+
+# Node.js
+node_modules/
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
